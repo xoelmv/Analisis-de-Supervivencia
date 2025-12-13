@@ -1,0 +1,710 @@
+---
+title: "Análisis de Supervivencia"
+author: "Uxio Merino, Xoel Montes & Borja Souto"
+date: "`r format(Sys.Date(), '%d/%m/%Y')`"
+subtitle: "TRABAJO TEMAS 1-3"
+lang: es
+output: 
+  pdf_document: 
+    number_sections: false
+    fig_caption: yes
+  html_document: 
+    number_sections: false
+    fig_caption: yes
+---
+
+## Ejercicio 1
+
+Para realizar el ejercicio 1 comenzamos cargando los datos y las librerías necesarias. Como se especifica en el enunciado, tomamos una muestra aleatoria del 80% de los datos (la parte entera del 80%), utilizando la semilla 2425 para garantizar la reproducibilidad. Luego, filtramos los datos para quedarnos únicamente con los pacientes tratados con clorhexidina (Z1 = 1).
+
+```{r, echo=FALSE}
+# Cargar las librerías necesarias
+library(survival)
+library(KMsurv)
+
+# Cargar los datos burn
+data(burn)
+
+# Establecer semilla para reproducibilidad
+set.seed(2425)
+
+# Seleccionar el 80% de los datos
+n <- nrow(burn)
+sample_size <- trunc(0.8 * n)
+sample_indices <- sample(1:n, sample_size)
+burn_sample <- burn[sample_indices, ]
+
+# Filtrar pacientes tratados con clorhexidina (Z1 = 1)
+burn_chlorhexidine <- subset(burn_sample, Z1 == 1)
+```
+
+A continuación, representamos el estimador Kaplan-Meier y el estimador empírico suponiendo que no hay censura. En el gráfico, la línea negra representa el estimador Kaplan-Meier y la línea roja representa el estimador empírico. Mostramos además los límites de confianza de ambos estimadores.
+
+```{r, echo=FALSE, fig.cap="Estimador Kaplan-Meier vs Empírico"}
+# Estimador de Kaplan-Meier
+km_fit <- survfit(Surv(T3, D3) ~ 1, data = burn_chlorhexidine)
+
+# Estimador empirico (sin censura)
+emp_fit <- survfit(Surv(T3, rep(1, length(T3))) ~ 1, data = burn_chlorhexidine)
+
+# Gráfico comparativo
+plot(km_fit, 
+     xlab = "Tiempo (días)", ylab = "Probabilidad de Supervivencia",
+     conf.int = TRUE)
+lines(emp_fit, col = "red", lty = 2)
+legend("topright", legend = c("Kaplan-Meier", "Empírico"), 
+       col = c("black", "red"), lty = 1:2)
+```
+
+Como se observa en el gráfico, la probabilidad de supervivencia estimada mediante el método de Kaplan-Meier es superior a la estimación empírica, lo que es esperado dado que el estimador Kaplan-Meier tiene en cuenta la censura de los datos. Al no tener en cuenta la censura, el estimador empírico proporciona una estimación más pesimista de la supervivencia, ya que trata las censuras como si fueran eventos, lo que disminuye la probabilidad de supervivencia.
+
+A continuación calculamos la media y la mediana del tiempo de vida para ambos estimadores, así como sus intervalos de confianza al 95%. En primer lugar, el estimador de Kaplan-Meier:
+
+```{r, echo=FALSE}
+# Media y mediana del estimador Kaplan-Meier
+print(km_fit, print.rmean = TRUE)
+```
+
+Para el estimador Kaplan-Meier, la media del tiempo de vida es de 54.7 días. La mediana no se puede calcular porque no hay ningún valor donde la función de supervivencia sea menor o igual a 0.5, pero sí podemos calcular el límite inferior del intervalo de confianza, que es 42 días. Si observamos la gráfica donde mostramos los estimadores, podemos ver que el límite inferior del intervalo de confianza coincide con el valor de la última observación (el que tiene una probabilidad de supervivencia menor). El límite superior del intervalo de confianza tampoco se puede calcular porque la última observación es una censura, como mostramos en la salida a continuación, por lo que al no haber eventos después del último tiempo censurado, no es posible calcular un límite superior válido para la mediana.
+
+```{r, echo=FALSE}
+# Valor de D3 de la última observación
+burn_chlorhexidine[which.max(burn_chlorhexidine$T3), "D3"]
+```
+
+A continuación, el estimador empírico:
+```{r, echo=FALSE}
+# Media y mediana del estimador empírico
+print(emp_fit, print.rmean = TRUE)
+```
+
+Para el estimador empírico, la media del tiempo de vida es de 23.8 días. La mediana toma un valor de 20 días, con un intervalo de confianza al 95% que tiene como límite inferior 17 días y como límite superior 23 días.
+
+Después, calculamos la probabilidad de supervivencia a la infección a los 10 días y al mes de ingreso, indicando los intervalos de confianza al 95%.
+
+```{r, echo = FALSE}
+# Supervivencia a 10 días
+summary(km_fit, time = 10)
+```
+Como vemos, la probabilidad de supervivencia a la infección a los 10 días es de 0.84, con un intervalo de confianza de [0.754,0.936].
+
+```{r, echo = FALSE}
+# Supervivencia a 30 días (1 mes)
+summary(km_fit, time = 30)
+```
+
+A los 30 días, la probabilidad de supervivencia es de 0.721, con un intervalo de confianza de [0.612,0.849].
+
+Para resolver el apartado d), comenzamos ajustando los modelos paramétricos Weibull, exponencial, lognormal y loglogístico a los datos. Para ello utilizamos la función `survreg` de la librería `survival`, que nos permite ajustar modelos de regresión de supervivencia.
+
+```{r, echo = FALSE}
+# Ajuste de modelos paramétricos
+weibull_fit <- survreg(Surv(T3, D3) ~ 1, data = burn_chlorhexidine, dist = "weibull")
+exp_fit <- survreg(Surv(T3, D3) ~ 1, data = burn_chlorhexidine, dist = "exponential")
+lnorm_fit <- survreg(Surv(T3, D3) ~ 1, data = burn_chlorhexidine, dist = "lognormal")
+llogis_fit <- survreg(Surv(T3, D3) ~ 1, data = burn_chlorhexidine, dist = "loglogistic")
+
+models <- list(Weibull = weibull_fit, Exponential = exp_fit, 
+               Lognormal = lnorm_fit, Loglogistic = llogis_fit)
+```
+
+A continuación, comparamos los modelos ajustados utilizando el criterio de Akaike (AIC) y la log-verosimilitud. Para ello, calculamos el AIC y la log-verosimilitud para cada modelo ajustado.
+
+```{r, echo = FALSE}
+# Comparación por log-verosimilitud y AIC
+
+loglik_aic_values <- sapply(models, function(m) {
+  c(LogLik = m$loglik, AIC = -2*m$loglik + 2*length(m$coefficients))
+})
+
+print(loglik_aic_values)
+```
+
+En base a los resultados obtenidos, nos quedaremos con el modelo lognormal, ya que es el que tiene el menor AIC (183.90590) y la log-verosimilitud más alta (-90.95295).
+
+Finalmente, representamos gráficamente la función de riesgo del modelo lognormal y estimamos la probabilidad de supervivencia a los 10 y 30 días.
+
+Calculamos la función de riesgo mediante la razón entre la función de densidad de probabilidad y la función de supervivencia:
+
+$$
+h(t) = \frac{f(t)}{S(t)}
+$$
+
+donde la función de supervivencia se calcula como 1 menos la función de distribución de probabilidad:
+
+$$
+S(t) = 1 - F(t)
+$$
+
+```{r, echo = FALSE, fig.cap="Función de riesgo del modelo lognormal"}
+# Representación gráfica y estimaciones para el modelo lognormal
+
+# Extraer parámetros del modelo
+mu <- lnorm_fit$coef;mu  # media en escala logarítmica
+sigma <- lnorm_fit$scale; sigma # desviación estándar en escala logarítmica
+
+### Función de riesgo del modelo lognormal
+# h(t) = [f(t)] / [1 - F(t)] 
+# donde f(t) es la densidad y F(t) la función de distribución
+
+hazard_lognormal <- function(t) {
+  dlnorm(t, meanlog = mu, sdlog = sigma) / 
+    (1 - plnorm(t, meanlog = mu, sdlog = sigma))
+}
+
+# Gráfico de la función de riesgo
+curve(hazard_lognormal, from = 0.1, to = max(burn_chlorhexidine$T3),
+      xlab = "Tiempo (días)", ylab = "Riesgo de infección",
+      col = "blue", lwd = 2)
+grid()
+
+# Añadir líneas de referencia en 10 y 30 días
+abline(v = c(10, 30), col = "blue", lty = 2)
+text(x = c(10, 30), y = par("usr")[4]*0.9, 
+     labels = c("10 días", "30 días"), pos = 2, col = "blue")
+```
+
+La función de riesgo del modelo lognormal muestra una disminución en el riesgo de infección a medida que aumenta el tiempo, lo que indica que los pacientes tienen un menor riesgo de infección a medida que pasan más días desde el ingreso del paciente.
+
+```{r, echo = FALSE}
+### Estimación de la supervivencia a 10 y 30 días
+# Función de supervivencia para la lognormal: S(t) = 1 - F(t)
+surv_10 <- 1 - plnorm(10, meanlog = mu, sdlog = sigma)
+surv_30 <- 1 - plnorm(30, meanlog = mu, sdlog = sigma)
+
+cat("Supervivencia estimada:\n")
+cat("  - A 10 días:", round(surv_10, 4), "\n")
+cat("  - A 30 días:", round(surv_30, 4), "\n")
+```
+
+La supervivencia estimada a 10 y 30 días es de 0.8606 y 0.7038, valores que son coherentes con los obtenidos mediante el estimador Kaplan-Meier (0.84 y 0.721). Esto indica que el modelo lognormal se ajusta razonablemente a los datos y proporciona estimaciones de supervivencia similares a las obtenidas mediante el método no paramétrico.
+
+## Ejercicio 2
+
+Para realizar el ejercicio 2 consideraremos la muestra aleatoria de 80% de los datos que hemos utilizado en el ejercicio 1. En este caso, no filtramos por el tratamiento con clorhexidina, sino que utilizamos todos los datos disponibles. 
+
+A continuación representamos la supervivencia y el riesgo acumulado por tipo de quemadura (Z11). Para ello, utilizamos la función survfit para ajustar el modelo de supervivencia y luego graficamos los resultados. 
+
+
+```{r}
+km_Z11<-survfit(Surv(T3,D3)~Z11, data=burn_sample)
+```
+
+```{r, echo = FALSE, fig.cap="Curvas de supervivencia y riesgo acumulado estratificadas por tipo de quemadura (Z11)."}
+par(mfrow=c(1,2))
+plot(km_Z11, col=1:4, mark.time=T, conf.int=F, ylab="Supervivencia", xlab="Tiempo en meses")
+legend("bottomleft", legend=sort(unique(burn_sample$Z11)), lty=1, col=1:4, cex=0.6)
+
+
+#Diferencias en el riesgo acumulado
+plot(km_Z11, fun="cumhaz",col=1:4, mark.time=T, conf.int=F, ylab="Riesgo acumulado",xlab="Tiempo en meses")
+legend("topleft", legend=sort(unique(burn_sample$Z11)), lty=1,col=1:4, cex=0.6)
+par(mfrow=c(1,1))
+```
+
+Los pacientes con quemaduras provocadas por llamas (tipo 4) alcanzan el mayor tiempo hasta la infección por estrafilococos. El grupo con menor tiempo hasta la infección es el de quemaduras eléctricas (tipo 3).
+
+En cuanto a los riesgos acumulados, los pacientes con quemaduras químicas (tipo 1) tienen el riesgo acumulado más bajo, a pesar de no alcanzar tiempos superiores a (aproximadamente) 40 meses. El grupo 3 tiene el riesgo acumulado que más rápido crece, y apenas alcanzan tiempos superiores a 20 meses.
+
+A la vista de las curvas de supervivencia, observando que los grupos 3 y 4 se cruzan, no podríamos asumir que los riesgos entre estos son proporcionales. En cuanto al resto de grupos, parece sí haber riesgos proporcionales.
+
+Pasamos a comparar los tiempos de supervivencia entre grupos a través del log-rank test.
+```{r, echo = FALSE}
+test <- survdiff(Surv(T3, D3) ~ Z11, data = burn_sample, rho = 0)
+cat("P-valor del test log-rank:", test$pvalue)
+```
+
+Tomando alpha = 0.05, rechazamos la hipótesis nula de igualdad de curvas de supervivencia entre todos los grupos. Vamos a investigar entre cuáles se producen las diferencias, aplicando el test entre cada par de grupos:
+
+```{r, echo = FALSE}
+grupos <- sort(unique(burn_sample$Z11))
+
+pvals <- matrix(NA, nrow=length(grupos), ncol=length(grupos),
+                dimnames = list(paste0("Grupo_", grupos), paste0("Grupo_", grupos)))
+
+for(i in 1:(length(grupos)-1)) {
+  for(j in (i+1):length(grupos)) {
+    g1 <- grupos[i]
+    g2 <- grupos[j]
+    
+    subdata <- burn_sample[burn_sample$Z11 %in% c(g1, g2), ]
+    
+    test <- survdiff(Surv(T3, D3) ~ Z11, data = subdata)
+    pval <- test$pvalue
+    pvals[i,j] <- round(pval, 4)
+  }
+}
+
+pvals
+```
+
+Los resultados del test log-rank indican que las diferencias están entre los grupos 1-3 y 3-4. Es decir, es significativamente distinto el tiempo hasta la infección por estrafilococos en los pacientes que sufren quemaduras de tipo químico y eléctrico, y entre tipo eléctrico y provocadas por llama ('flame').
+
+A la hora de valorar si tiene sentido aplicar un test de tendencia, concluímos que no ya que los grupos no están ordenados de forma natural. La variable Z11 es un factor, representando el tipo de quemadura, por lo que no tiene sentido hacer un test de tendencia.
+
+## Ejercicio 3
+
+Ajustamos un modelo de regresión de riesgos proporcionales para el riesgo de infección que depende del las covariables Z1, Z2, Z3, Z4 y Z11. Mostramos el summary del ajuste:
+
+```{r, echo=FALSE}
+rownames(burn_sample) <- seq(1, length(burn_sample[,1]))
+
+# Ajustamos un modelo de riesgos proporcionales:
+cox_1 <- coxph(Surv(T3, D3) ~ Z1 + Z2 + Z3 + Z4 + factor(Z11), data = burn_sample)
+summary(cox_1)
+```
+
+El modelo **sí es significativo**. Los tres tests estadísticos reportados devuelven *p-valores* menores que 0.05, lo que indica que, a un nivel de confianza del 95%, al menos una de las covariables tiene un efecto significativo sobre el riesgo de infección.
+
+Las covariables que resultaron significativas en el modelo usando un nivel de significación del 10% son:
+
+-   **Z1**: Método de limpieza (p-valor = 0.0867)\
+-   **Z3**: Raza (p-valor = 0.0572)\
+-   **Z11_3**: Quemadora eléctrica (p-valor = 0.0488)
+
+Las covariables restantes no resultaron significativas (*p-valores* \>\> 0.1).\
+Podemos aceptar que:\
+$$
+\beta_{Z2} = \beta_{Z4} = \beta_{Z11(1)} = \beta_{Z11(2)} = \beta_{Z11(4)} = 0
+$$
+
+Simplificamos el modelo utilizando el método de selección por pasos basado en el AIC, manteniendo la covariable Z1. Volvemos a mostrar su summary:
+
+```{r, echo = FALSE}
+cox_Z1 <-coxph(Surv(T3, D3) ~ Z1, data=burn_sample)
+cox_AIC <- step(cox_Z1,scope=list(upper=cox_1,lower=~Z1), direction="forward")
+
+summary(cox_AIC)
+```
+
+El proceso de selección hacia adelante (*forward*) basado en el AIC ajusta el modelo de riesgos proporcionales incluyendo las siguientes covariables:
+
+-   **Z1**: Método de limpieza\
+-   **Z3**: Raza\
+-   **Z11**: Tipo de quemadura
+
+```{r, echo = FALSE}
+cat("AIC modelo completo:", AIC(cox_1))
+cat("\nAIC modelo simplificado:", AIC(cox_AIC))
+```
+
+No incluir **Z2** (Género) y **Z4** (Superficie total quemada) en el modelo reduce el AIC en 2.765 unidades.
+
+A continuación calculamos el riesgo relativo de un paciente con una quemadura de tipo 3 (eléctrica) respecto a un paciente con una quemadura de tipo 4 (fuego) en el modelo simplificado.
+
+$$
+HR = \frac{\lambda(T \mid \beta_{Z11=3})}{\lambda(T \mid \beta_{Z11=4 })} = \frac{e^{2.2788}}{e^{1.0293}} \approx 3.489
+$$
+
+Pacientes con quemaduras eléctricas (*Z11 = 3*) tienen un riesgo **3.489 veces mayor** de infección que aquellos con quemaduras por fuego (*Z11 = 4*).
+
+Para el intervalo de confianza al 95% utilizamos la siguiente fórmula:
+
+$$
+IC_{95\%} = \left( e^{(2.2788 - 1.0293)- 1.96 \times 0.4979}, e^{(2.2788 - 1.0293)+ 1.96 \times 0.4979} \right)
+$$
+De donde la desviación típica fue obtenida de la raíz cuadrada de la siguiente expresión:
+$$
+\text{VAR}(\beta_{Z11=3}, \beta_{Z11=4}) = \text{VAR}(\beta_{Z11=3}) + \text{VAR}(\beta_{Z11=4}) - 2 \cdot \text{COV}(\beta_{Z11=3}, \beta_{Z11=4})
+$$
+
+```{r, echo = FALSE}
+VAR_conjunta <- cox_AIC$var[4, 4] + cox_AIC$var[5, 5] - 2 * cox_AIC$var[4, 5]  
+SE_conjunta <- sqrt(VAR_conjunta)                     
+
+# Intervalo de confianza al 95%
+lower <- exp((2.2788 - 1.0293) - 1.96 * SE_conjunta)
+upper <- exp((2.2788 - 1.0293) + 1.96 * SE_conjunta)
+
+# Resultado
+cat("HR =", exp(2.2788 - 1.0293), "\nIC_{95%} = (", lower, ", ", upper, ")\n")
+```
+
+Analizamos los residuos del modelo simplificado.
+
+```{r, fig.cap="Residuos de Martingala modelo obtenido por selección por pasos basado en el AIC ", echo = FALSE}
+#Residuos martingala
+res_martingala <- residuals(cox_AIC,type="martingale")
+
+par(mfrow=c(1,3))
+plot(res_martingala~as.factor(Z1), data=burn_sample)
+plot(res_martingala~as.factor(Z3), data=burn_sample)
+plot(res_martingala~as.factor(Z11), data=burn_sample)
+par(mfrow=c(1,1))
+```
+
+Los residuos están bien distribuidos alrededor de cero para todas las variables, aunque se observan algunos patrones.
+
+-   Los residuos de **Z3** (Raza) para la categoría "blanca" presentan una mayor dispersión.\
+    Esto puede deberse a que hay pocas observaciones donde `Z3 = 0` (raza blanca) y que sufrieron el evento:
+  
+Mostramos la tabla de contingencia entre **Z3** (filas) y **D3** (columnas):
+
+```{r, echo = FALSE}
+table(burn_sample$Z3, burn_sample$D3)
+```
+Algo similar ocurre con **Z11** (tipo de quemadura): los residuos para el nivel 1 (quemadura química) presentan una dispersión mucho menor que el resto de niveles.\
+Además, los niveles 1, 2 y 3 están muy poco representados y contienen pocas observaciones que sufren el evento. Lo observamos de nuevo a través de la tabla de contingencia:
+
+```{r, echo = FALSE}
+table(burn_sample$Z11, burn_sample$D3)
+```
+
+```{r, fig.cap="Residuos de Cox-Snell modelo obtenido por selección por pasos basado en el AIC ", echo = FALSE}
+#Residuos de Cox-Snell
+res_Cox_Snell <- residuals(cox_AIC)
+
+res.cs<-burn_sample$D3-res_Cox_Snell
+
+plot(survfit(Surv(res.cs,D3)~1,data=burn_sample), fun="cumhaz",conf.int=F,
+     ylab="riesgo acumulado",xlab="residuos Cox-Snell" )
+abline(a=0,b=1,col="red")
+```
+
+La curva de riesgo acumulado parece seguir razonablemente bien la línea de referencia, especialmente en los valores bajos y medios de los residuos.
+
+Chequeamos si tenemos observaciones influyentes.
+
+```{r, echo = FALSE}
+res.dfbeta<-residuals(cox_AIC,type="dfbeta");
+colnames(res.dfbeta) <- names(cox_AIC$coefficients)
+par(mfrow = c(2, 3))
+for (i in 1:ncol(res.dfbeta)) {
+  plot(res.dfbeta[, i], type = "h",
+       main = colnames(res.dfbeta)[i],
+       ylab = "DFBETA", xlab = "Índice del paciente")
+  abline(h = c(-0.4, 0.4), col = "red", lty = 2)
+}
+par(mfrow=c(1,1))
+```
+
+Se observan algunas observaciones que tienen un gran efecto en la estamación de $\beta_{Z3}$ y $\beta_{Z11}$. 
+
+```{r, echo = FALSE}
+sort(res.dfbeta[, 2])[1]
+```
+
+```{r, echo = FALSE}
+sort(res.dfbeta[, 3])[1] 
+sort(res.dfbeta[, 4])[1] 
+sort(res.dfbeta[, 5])[1] 
+```
+
+La observación 73 tiene un gran efecto sobre la estimación de $\beta_{Z3}$ y la observación 56 tiene un gran efecto sobre la estimación de $\beta_{Z11}$.
+
+Ajustamos el modelo utilizando el conjunto de datos sin las observaciones influyentes, y mostramos el summary.
+
+```{r, echo = FALSE}
+burn_sin_influyentes <- burn_sample[c(-56, -73),]; dim(burn_sin_influyentes)
+cox_mejorado <- coxph(Surv(T3, D3) ~ Z1 + Z3 + factor(Z11), data=burn_sin_influyentes)
+
+summary(cox_mejorado)
+```
+
+Al ajustar el modelo hemos obtenido un mensaje de advertencia: la función de verosimilitud convergió antes de que algunos coeficientes se estabilizaran.
+
+Mostramos a continuación la tabla de contingencia entre **Z3** (raza) y **D3** (infección) para el modelo ajustado sin las observaciones influyentes:
+
+```{r, echo = FALSE}
+table(burn_sin_influyentes$Z3, burn_sin_influyentes$D3)
+```
+
+Podemos ver que, al eliminar las observaciones influyentes, para **Z3 = 0** no hay ningún caso de infección (*D3 = 1*). \
+
+Realizamos lo mismo para la variable **Z11** (tipo de quemadura):
+```{r, echo = FALSE}
+table(burn_sin_influyentes$Z11, burn_sin_influyentes$D3)
+```
+Para **Z11 = 1** (quemadura química) tampoco se observan infecciones.
+
+Eliminar estas observaciones implicaría perder información clave, ya que son los **únicos casos de infección en sus respectivas categorías** (*Z3 = 0* y *Z11 = 1*).\
+Su exclusión generaría un **sesgo en las estimaciones del riesgo** para estos grupos. Decidimos mantener estas observaciones para el ajuste del modelo.
+
+
+Con el objetivo de intentar mejorar el modelo, se decidió incluir la interacción entre **Z1** (método de limpieza) y **Z3** (raza) en el modelo. Es decir, se evaluó si el efecto del método de limpieza sobre el riesgo de infección varía según la raza del paciente. Seguimos el mismo procedimiento que antes:
+
+```{r, echo = FALSE}
+cox_mejorado2 <- coxph(Surv(T3, D3) ~ Z1*factor(Z11), data = burn_sample)
+table(burn_sample$Z1, burn_sample$Z3, burn_sample$D3)
+```
+
+Obtenemos el mismo mensaje de advertencia que anteriormente.\
+Para **Z3 = 0**, no hay ningún caso de infección cuando **Z1 = 0**. Por lo tanto, no se puede estimar el efecto de **Z1** en **Z3 = 0**.
+
+En consecuencia, se decidió eliminar del modelo la variable **Z3**.
+
+Vamos ahora a intentar mejorar el modelo agrupando niveles de la variable **Z11**, y mostramos el summary resultante.\
+
+```{r, echo = FALSE}
+cox_mejorado3 <- coxph(Surv(T3, D3) ~ Z1 + factor(Z11), data = burn_sample)
+summary(cox_mejorado3)
+```
+
+Vamos a intentar mejorar el modelo agrupando niveles de la variable **Z11**.\
+La covariable menos significativa en el modelo ajustado es **Z11(2)**. Por lo tanto, se agrupan los niveles **1** y **2** de la variable **Z11**.
+
+```{r, echo = FALSE}
+burn_sample$Z11_agrup <- ifelse(burn_sample$Z11 %in% 1:2, "1-2",
+                                ifelse(burn_sample$Z11 == 3, "3", "4"))
+
+cox_mejorado4 <- coxph(Surv(T3, D3) ~ Z1 + factor(Z11_agrup), data = burn_sample)
+summary(cox_mejorado4)
+```
+
+No es significativo el nivel **Z11(4)**. Reagrupamos **Z11**.
+
+```{r, echo = FALSE}
+burn_sample$Z11_agrup <- ifelse(burn_sample$Z11 %in% c(1:2,4), "1-2-4", "3")
+
+cox_mejorado5 <- coxph(Surv(T3, D3) ~ Z1 + Z11_agrup, data = burn_sample)
+summary(cox_mejorado5)
+
+cat("AIC modelo simplificado:", AIC(cox_AIC))
+cat("\nAIC modelo con Z1 y agrupando niveles de Z11:", AIC(cox_mejorado5))
+```
+
+El modelo ajustado con las variables **Z1**, **Z3** y **Z11** es preferible en términos de **AIC** al modelo ajustado con las variables **Z1** y **Z11**, agrupando los niveles **1**, **2** y **4**.\
+No obstante, en este segundo modelo todas las variables son significativas y el **AIC** se incrementa en menos de 2 unidades.
+
+Procedemos a chequear la validez de este nuevo modelo.
+
+```{r, fig.cap="Residuos de Martingala modelo con Z1 y agrupando niveles de Z11", echo = FALSE}
+#Residuos martingala
+res_martingala <- residuals(cox_mejorado5,type="martingale")
+
+par(mfrow=c(1,2))
+plot(res_martingala~as.factor(Z1), data=burn_sample)
+plot(res_martingala~as.factor(Z11_agrup), data=burn_sample)
+par(mfrow=c(1,1))
+```
+
+```{r, fig.cap="Residuos de Cox-Snell modelo con Z1 y agrupando niveles de Z11", echo = FALSE}
+#Residuos de Cox-Snell
+res_Cox_Snell <- residuals(cox_mejorado5)
+
+res.cs<-burn_sample$D3-res_Cox_Snell
+
+plot(survfit(Surv(res.cs,D3)~1,data=burn_sample), fun="cumhaz",conf.int=F,
+     ylab="riesgo acumulado",xlab="residuos Cox-Snell" )
+abline(a=0,b=1,col="red")
+```
+
+Los residuos muestran un ajuste adecuado.
+
+```{r, echo = FALSE}
+res5.dfbeta <- residuals(cox_mejorado5, type="dfbeta")
+colnames(res5.dfbeta) <- names(cox_mejorado5$coefficients)
+par(mfrow = c(1, 2))
+for (i in 1:ncol(res5.dfbeta)) {
+  plot(res5.dfbeta[, i], type = "h",
+       main = colnames(res5.dfbeta)[i],
+       ylab = "DFBETA", xlab = "Índice del paciente")
+  abline(h = c(-0.4, 0.4), col = "red", lty = 2)
+}
+par(mfrow = c(1, 1))
+```
+
+A continuación, obtenemos las 5 observaciones más influyentes sobre la estimación de $\beta_{Z11\_agrup}$.
+
+```{r, echo = FALSE}
+sort(res5.dfbeta[, 2])[1:5]
+```
+Las cuatro observaciones más influyentes para la estimación de $\beta_{Z11\_agrup}$ coinciden con las 4 únicas observaciones donde la quemadura fue eléctrica y no sufrieron infección, como vemos a continuación:
+
+```{r, echo = FALSE}
+table(burn_sample$Z11_agrup, burn_sample$D3)
+```
+
+```{r, echo = FALSE}
+burn_sample[c(112 ,26 ,38 ,113), c("Z11_agrup", "D3")] 
+```
+
+
+
+A continuación, utilizando los residuos de Schoenfeld chequeamos si se cumplen riesgos proporcionales.
+
+```{r, echo = FALSE}
+# Residuos de Schoenfeld: 
+cox.zph(cox_mejorado5, terms=F)
+
+par(mfrow=c(1,2))
+plot(cox.zph(cox_mejorado5, terms=F))
+par(mfrow=c(1,1))
+```
+
+Aunque a un nivel de significación del 5% no se rechaza el supuesto de riesgos proporcionales,\
+a un nivel del 10% (p-valor = 0.065) sí se rechaza para la covariable **Z11_agrup**.
+
+Probamos a estratificar, inicialmente con la variable **Z11** original, sin haberla agrupado.
+
+```{r, echo = FALSE}
+cox_strat <- coxph(Surv(T3, D3) ~ Z1 + strata(Z11), data = burn_sample)
+summary(cox_strat)
+
+cat("AIC modelo estratificando la variable Z11 original:", AIC(cox_strat))
+cat("\nAIC modelo simplificado:", AIC(cox_AIC))
+```
+
+```{r cap.title = "Curvas de supervivencia y de riesgo acumulado estratificadas por tipo de quemadura (Z11).", echo = FALSE}
+km.ph=survfit(cox_strat)
+par(mfrow = c(1, 2))
+plot(km.ph,col=1:4)
+plot(km.ph,fun="cumhaz",col=1:4)
+par(mfrow = c(1, 1))
+```
+
+En el modelo de riesgos proporcionales, las curvas de supervivencia no deben cruzarse.\
+Cuando esto ocurre, como en este caso, indica que los riesgos no son proporcionales.
+
+Dado que con la variable **Z11** original los riesgos no son proporcionales,\
+se decide estratificar por **Z11_agrup**.
+
+```{r, echo = FALSE}
+cox_strat <- coxph(Surv(T3, D3) ~ Z1 + strata(Z11_agrup), data = burn_sample)
+summary(cox_strat)
+
+cat("AIC modelo estratificando la variable Z11_agrup:", AIC(cox_strat))
+cat("\nAIC modelo simplificado:", AIC(cox_AIC))
+```
+
+Seguimos obteniendo mejor AIC estratificando la variable **Z11_agrup**
+
+```{r cap.title = "Curvas de supervivencia y de riesgo acumulado estratificadas por Z11_agrup.", echo = FALSE}
+km.ph=survfit(cox_strat)
+par(mfrow = c(1, 2))
+plot(km.ph,col=1:4)
+plot(km.ph,fun="cumhaz",col=1:4)
+par(mfrow = c(1, 1))
+```
+
+Ahora los riesgos sí son proporcionales, pues las curvas no se cruzan. Procedemos a chequear la validez del modelo.
+
+```{r, fig.cap="Residuos de Cox-Snell modelo con Z1 y estratificando Z11_agrup", echo = FALSE}
+# Cox-Snell estratificado
+res_Cox_Snell <- residuals(cox_strat)
+
+res.cs<-burn_sample$D3-res_Cox_Snell
+
+plot(survfit(Surv(res.cs,D3)~1,data=burn_sample), fun="cumhaz",conf.int=F,
+     ylab="riesgo acumulado",xlab="residuos Cox-Snell" )
+abline(a=0,b=1,col="red")
+```
+
+Los residuos del modelo ajustado, estratificado por la variable artificial **Z11_agrup**, están muy próximos a la diagonal, lo que sugiere que el modelo presenta una buena bondad de ajuste.
+
+A continuación, en respuesta al apartado f, se ajustan dos modelos para el riesgo de infección dependiendo del método de limpieza corporal (Z1) y del porcentaje de superficie quemada (Z4). El primero de ellos incluye Z4 como efecto lineal, mientras que el segundo incluye un suavizado spline de dicha variable continua.
+
+```{r, echo = FALSE}
+# Modelo con Z4 como efecto lineal
+cox_lineal <- coxph(Surv(T3, D3) ~ Z1 + Z4, data = burn_sample)
+summary(cox_lineal)
+
+# Modelo con Z4 como suavizado spline (usando pspline)
+cox_spline <- coxph(Surv(T3, D3) ~ Z1 + pspline(Z4,method="aic"), data = burn_sample)
+
+summary(cox_spline)
+
+# Comparación de modelos
+cat("AIC modelo lineal:", AIC(cox_lineal), "\n")
+cat("AIC modelo spline:", AIC(cox_spline), "\n")
+```
+
+Podemos observar como el AIC del modelo que incluye Z4 con un suavizado spline es ligeramente menor.
+A continuación, representamos gráficamente el efecto no lineal de Z4 en este modelo:
+
+```{r, echo = FALSE}
+# Representación gráfica del efecto no lineal
+termplot(cox_spline, term = 2, se = TRUE, rug = TRUE,
+         xlab = "Porcentaje de superficie quemada (Z4)",
+         ylab = "Efecto parcial",
+         main = "Efecto no lineal de Z4 en el riesgo de infección")
+```
+La gráfica muestra como este enfoque no paramétrico adopta una representación no lineal, sugiriendo que el efecto de Z4 en el riesgo de infección no es constante, sino que fluctúa. 
+
+Para comparar ambos modelos, además de haber contrastado los AIC, haremos lo mismo con sus residuos.
+
+```{r, echo = FALSE}
+# Chequeamos los residuos del modelo con Z4 como efecto lineal
+
+#Residuos martingala 
+res_martingala <- residuals(cox_lineal,type="martingale")
+
+par(mfrow=c(1,3))
+plot(res_martingala~as.factor(Z1), data=burn_sample)
+plot(res_martingala~Z4, data=burn_sample)
+lines(lowess(res_martingala~burn_sample$Z4))
+
+#Residuos de Cox-Snell
+res_Cox_Snell <- residuals(cox_lineal)
+
+res.cs<-burn_sample$D3-res_Cox_Snell
+
+plot(survfit(Surv(res.cs,D3)~1,data=burn_sample), fun="cumhaz",conf.int=F,
+     ylab="riesgo acumulado",xlab="residuos Cox-Snell" )
+abline(a=0,b=1,col="red")
+par(mfrow=c(1,1))
+```
+
+```{r, echo = FALSE}
+# Chequeamos los residuos del modelo con Z4 como suavizado spline
+
+#Residuos martingala
+res_martingala <- residuals(cox_spline,type="martingale")
+
+par(mfrow=c(1,3))
+plot(res_martingala~as.factor(Z1), data=burn_sample)
+plot(res_martingala~Z4, data=burn_sample)
+lines(lowess(res_martingala~burn_sample$Z4))
+
+
+
+#Residuos de Cox-Snell
+#####################################################
+
+res_Cox_Snell <- residuals(cox_spline)
+
+res.cs<-burn_sample$D3-res_Cox_Snell
+
+plot(survfit(Surv(res.cs,D3)~1,data=burn_sample), fun="cumhaz",conf.int=F,
+     ylab="riesgo acumulado",xlab="residuos Cox-Snell" )
+abline(a=0,b=1,col="red")
+par(mfrow=c(1,1))
+```
+
+El modelo con splines para Z4 presenta residuos mejor comportados, evidenciando un ajuste superior. La relación no lineal captura mejor el efecto de la superficie quemada y los residuos Cox-Snell se acercan más a la diagonal ideal.
+
+
+Finalmente, respecto al último apartado, a la hora de estudiar la significación de una variable como el tratamiento de cierto antibiótico, que es dependiente del tiempo, es necesario un paso previo al ajuste del modelo de Cox. 
+Vamos a escribir los datos en un formato start-stop, donde para los pacientes que en algún momento hayan tomado el antibiótico y en otro no aparecerán dos filas distintas. En cada una de ellas aparecerá el tiempo de inicio y de fin, un indicador de fallo en ese tiempo y un indicador de la toma de antibiótico en ese tiempo.
+
+Por ejemplo, mostrando las dos primeras filas del nuevo dataframe, vemos que representan el mismo individuo (tienen el mismo indicador) en dos tiempos distintos: de 0 a 2, donde no tomó antibiótico, y de 2 a 30, donde sí lo tomó. En este caso, no sufrió el evento en ninguno de los dos intervalos.
+
+```{r, echo = FALSE}
+# Añadir una columna 'id' basada en el número de fila
+burn_sample$id <- 1:nrow(burn_sample)
+
+# Crear la estructura de seguimiento con evento de infección
+burn_sample2 <- tmerge(burn_sample, burn_sample, id = id,
+                       infeccion = event(T3, D3),
+                       antibiotic = tdc(T2, D2))
+burn_sample2$antibiotic[is.na(burn_sample2$antibiotic)] <- 0
+
+head(burn_sample2, 2)
+```
+
+
+Una vez tenemos los datos así, podemos proceder a ajustar un modelo de Cox:
+
+```{r, echo = FALSE}
+# Ajustar el modelo de Cox
+modelo <- coxph(Surv(tstart, tstop, infeccion) ~ antibiotic, data = burn_sample2)
+# Ver resumen del modelo
+summary(modelo)
+```
+
+Con un p-valor de 0.602, concluímos que el efecto de esta variable no es significativo.  
+
+En cuanto al efecto en el riesgo, el coeficiente estimado es de -0.2099, lo que indicaría una reducción del riesgo al tomar el antibiótico. Concretamente, el riesgo se reduciría en un 18.94% (1-exp(coef)=0.1894).
+Sin embargo, al no ser significativo el riesgo de la variable, no podemos concluir que este efecto en el riesgo sea concluyente. Coherentemente, vemos como el intervalo de confianza al 95% de la exponencial del coeficiente incluye al 1, por lo que no podemos asumir estas conclusiones como verdaderas.
+
+
