@@ -1,0 +1,335 @@
+---
+title: "Ejercicio 12 AS2025"
+author: "Xoel Montes Varela"
+date: "2025-05-20"
+output: pdf_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(mstate)
+library(cmprsk)
+```
+
+## Ejercicio 12
+
+Considérense los n = 1835 adultos con leucemia en el conjunto de datos
+ebmt1{mstate}, que pueden experimentar una recaída (evento 1) o una
+muerte en remisión (evento 2) a lo largo del seguimiento. Se pide:
+
+#### 12.1
+
+Mediante un modelo de regresión de riesgos de subdistribución
+proporcionales, estimar el efecto del `score`. ¿Es estadísticamente
+significativo al 5%? Obtener los factores multiplicativos de riesgo para
+los riesgos de subdistribución tomando el `score` de riesgo bajo como
+grupo de referencia.
+
+Cargamos los datos y los preparamos.
+
+```{r}
+data(ebmt1)
+ebmt1_adultos <- ebmt1[ebmt1$age>= 18,]  # filtramos para quedarnos con los adultos
+head(ebmt1_adultos, 10)
+```
+
+Los pacientes pueden experimentar dos eventos: recaída (`relstat == 1`)
+o muerte en remisión (`srvstat == 1`). Para el análisis de riesgos
+competitivos, definimos las variables necesarias de la siguiente manera:
+
+-   Tiempo hasta el evento (`ftime`): Determinamos el tiempo hasta el
+    primer evento de interés como el mínimo entre el tiempo hasta
+    recaída (`rel`) y el tiempo hasta muerte (`srv`):
+
+```{r}
+ebmt1_adultos$ftime <- pmin(ebmt1_adultos$rel, ebmt1_adultos$srv)
+```
+
+-   Variable de estado (`fstatus`): Clasificamos los eventos en tres
+    categorías:
+    -   Recaída (`fstatus=1`): Ocurre cuando hay recaída
+        (`relstat == 1`) y esta precede a la muerte (`rel < srv`)
+    -   Muerte en remisión (`fstatus=2`): Ocurre cuando hay muerte
+        (`srvstat== 1`) sin recaída previa (`rel == srv`)
+    -   Censura (`fstatus=0`): Para los casos sin eventos observados
+
+```{r}
+ebmt1_adultos$fstatus <- ifelse(ebmt1_adultos$relstat == 1 &
+                                  ebmt1_adultos$rel < ebmt1_adultos$srv, 1,
+                         ifelse(ebmt1_adultos$srvstat == 1 &
+                                  ebmt1_adultos$rel == ebmt1_adultos$srv, 2, 
+                                    0)) 
+prop.table(table(ebmt1_adultos$fstatus))
+```
+
+La distribución muestra que la muerte en remisión (35%) fue más
+frecuente que la recaída (23%). En muchas observaciones no se observó
+ninún evento, 42% de censuras.
+
+```{r}
+prop.table(table(ebmt1_adultos$score, ebmt1_adultos$fstatus),1)
+```
+
+Podemos observar que la proporción muerte/recaída aumenta con el riesgo
+(`score`). El riesgo alto tiene casi 50% de mortalidad y cerca del doble
+de recaídas que el grupo bajo.
+
+```{r}
+# Datos preparados para ajustar un modelo de regresión de riesgos
+# de subdistribución proporcionales
+datos <- data.frame(id=ebmt1_adultos$patid,
+                    time=ebmt1_adultos$ftime,
+                    status=ebmt1_adultos$fstatus,
+                    score = ebmt1_adultos$score,
+                    age = ebmt1_adultos$age)
+
+scoreMedium <- ifelse(datos$score == "Medium risk", 1, 0)
+scoreHigh <- ifelse(datos$score == "High risk", 1, 0)
+score <- cbind(scoreMedium, scoreHigh) # el gruop de referencia es "Low Risk
+```
+
+
+Comenzamos ajustando un modelo de riesgos de subdistribución
+proporcionales para la recaída, considerando la muerte en remisión como
+evento competitivo.
+
+```{r}
+modelo_1 <- crr(ftime = datos$time,
+              fstatus = datos$status,
+              cov1 = score,
+              failcode=1, # recaida
+              cencode=0)
+
+summary(modelo_1)
+```
+
+La variable `score` es significativa. Los coeficientes de ambos niveles
+del score presentan p-valores menores a 0.05:
+
+-   scoreMedium: p-value = 0.0440
+
+-   scoreHigh: p-value = 0.0018
+
+Factores multiplicativos de riesgo para los riesgos de subdistribución
+tomando el score de riesgo bajo como grupo de referencia:
+
+-   scoreMedium: exp(0.277) = 1.32
+
+-   scoreHigh: exp(0.604) = 1.83
+
+Tomando como referencia el grupo de bajo riesgo ("Low Risk"), el grupo
+de riesgo medio y el grupo de riesgo alto tienen un 32% y un 83% mayor
+riesgo de recaída respectivamente.
+
+Ajustamos un segundo modelo para estudiar el efecto del `score` sobre la
+muerte en remisión, considerando la recaída como evento competitivo.
+
+```{r}
+modelo_2 <- crr(ftime = datos$time,
+                fstatus = datos$status,
+                cov1 = score,
+                failcode=2, # muerte en remisión
+                cencode=0)
+
+summary(modelo_2)
+```
+
+La variable `score` muestra una fuerte significancia estadística para el
+evento de muerte en remisión. Todos los coeficientes presentan p-valores
+notablemente inferiores a 0.05:
+
+-   scoreMedium: p-value = 1.6e-06
+-   scoreHigh: p-value = 2.5e-10
+
+Factores multiplicativos de riesgo para los riesgos de subdistribución
+tomando el score de riesgo bajo como grupo de referencia:
+
+-   scoreMedium: exp(0.62) = 1.86
+-   scoreHigh: exp(1.05) = 2.86
+
+Tomando como referencia el grupo de bajo riesgo ("Low Risk"), el grupo
+de riesgo medio presenta un 86% mayor riesgo de muerte en remisión,
+mientras que el grupo de riesgo alto prácticamente triplica (HR=2.86) el
+riesgo de muerte en remisión. Estos efectos son más pronunciados que los
+observados para el riesgo de recaída.
+
+#### 12.2
+
+Discutir las limitaciones o posibles inconsistencias del modelo
+utilizado.
+
+El modelo de riesgos de subdistribución proporcionales de Fine-Gray es
+apropiado para estimar el efecto de la variable `score` sobre el riesgo
+de sufrir cada uno de los eventos considerados (recaída o muerte en
+remisión), en un contexto con eventos competitivos.
+
+Este enfoque permite modelar las funciones de incidencia acumulada
+(CIFs) cuando los eventos son mutuamente excluyentes, como ocurre en
+este caso: un paciente puede experimentar una recaída o fallecer en
+remisión, pero no ambos. Una de sus principales ventajas es que tiene en
+cuenta explícitamente la presencia de eventos competitivos. Por ejemplo,
+al estimar el riesgo de recaída, el modelo considera que una muerte en
+remisión impide la ocurrencia de dicho evento, y viceversa.
+
+Sin embargo, una limitación importante es que se requiere ajustar un
+modelo distinto para cada tipo de evento, considerando al otro como
+evento competitivo. Esto implica que no se puede suponer independencia
+entre eventos para estudiar el efecto del `score`. Si se asumiera dicha
+independencia, se podría utilizar un modelo de regresión de Cox
+estándar, donde las observaciones que experimentan el evento competidor
+se tratan como censuradas. No obstante, como se observa en la tabla,
+esta estrategia tiende a sobreestimar el efecto del `score` sobre el
+riesgo del evento de interés.
+
+Por ejemplo, en el caso de la recaída, el hazard ratio estimado para
+`scoreHigh` es 1.83 según el modelo de Fine-Gray, frente a 3.13 en el
+modelo de Cox. Esta diferencia refleja el sesgo que introduce el modelo
+de Cox al no tener en cuenta la naturaleza competitiva de los eventos.
+
+Finalmente, el modelo de Fine-Gray asume proporcionalidad en los
+riesgos de subdistribución, por lo que es necesario verificar esta
+hipótesis para asegurar la validez del modelo.
+
+En resumen, el modelo de Fine-Gray es adecuado para analizar el efecto
+del `score` en presencia de riesgos competitivos, ya que proporciona
+estimaciones precisas de la probabilidad acumulada de los eventos al
+considerar la dependencia entre ellos. No obstante, es fundamental
+comprobar que se cumpla el supuesto de riesgos proporcionales para
+garantizar la fiabilidad de los resultados.
+
+```{r}
+library(survival)
+modelo_1_cox <- coxph(Surv(time,status==1)~score,data=datos)
+modelo_1_cox
+
+modelo_2_cox <- coxph(Surv(time,status==2)~score,data=datos)
+modelo_2_cox
+```
+
+
+| Evento | Variable | Regresión de RC |   | Regresión de Cox |   |
+|------------|------------|------------|------------|------------|------------|
+|  |  | exp(coef) | p-valor | exp(coef) | p-valor |
+| **Recaída** | scoreMedium | 1.32 | 0.0440 | 1.612 | 0.000726 \*\*\* |
+|  | scoreHigh | 1.83 | 0.0018 | 3.126 | 4.9e-09 \*\*\* |
+| **Muerte en remisión** | scoreMedium | 1.86 | 1.6e-06 | 2.001 | 7.01e-08 \*\*\* |
+|  | scoreHigh | 2.86 | 2.5e-10 | 3.5021 | 2.93e-14 \*\*\* |
+
+**Tabla 1.** Resultados de la regresión de riesgos competitivos (RC) y
+regresión de Cox para los eventos de recaída y muerte en remisión según
+el score.
+
+#### 12.3
+
+Representar gráficamente las funciones de incidencia acumulada estimadas
+a partir del modelo para los tres grupos de score.
+
+```{r fig.cap="Funciones de incidencia acumulada (CIF) estimadas mediante el modelo de Fine-Gray para los eventos de recaída (izquierda) y muerte en remisión (derecha), considerando el `score` como variable explicativa." , fig.width=9, fig.height=5}
+par(mfrow=c(1,2))
+
+pred_low_1 <- predict(modelo_1, cov1 = matrix(c(0, 0), nrow = 1))
+pred_medium_1 <- predict(modelo_1, cov1 = matrix(c(1, 0), nrow = 1))
+pred_high_1 <- predict(modelo_1, cov1 = matrix(c(0, 1), nrow = 1))
+
+plot(pred_low_1, main = "CIFs de recaída\n(muerte como evento competitivo)",
+     ylim = c(0, 1), lwd=2, col="green", xlab = "Tiempo (días)", ylab = "",
+     cex.main = 0.8)
+lines(pred_medium_1, lty=2, lwd=2, col="blue")
+lines(pred_high_1, lty=3, lwd=2, col="red")
+legend("topright", legend = c("Low", "Medium", "High"),
+       lty = 1:3, lwd=2, col=c("green", "blue", "red"), cex = 0.7)
+
+pred_low_2 <- predict(modelo_2, cov1 = matrix(c(0, 0), nrow = 1))
+pred_medium_2 <- predict(modelo_2, cov1 = matrix(c(1, 0), nrow = 1))
+pred_high_2 <- predict(modelo_2, cov1 = matrix(c(0, 1), nrow = 1))
+
+plot(pred_low_2,  main = "CIFs de muerte en remisión\n(recaída como evento competitivo)",
+     ylim = c(0, 1), lwd=2, col="green", xlab = "Tiempo (días)", ylab = "",
+     cex.main = 0.8)
+lines(pred_medium_2, lty=2, lwd=2, col="blue")
+lines(pred_high_2, lty=3, lwd=2, col="red")
+legend("topright", legend = c("Low", "Medium", "High"),
+       lty = 1:3, lwd=2, col=c("green", "blue", "red"), cex = 0.7)
+```
+
+Se observa que el riesgo acumulado de ambos eventos aumenta con el nivel
+de riesgo (`score`), siendo más pronunciado en el grupo de alto riesgo.
+En particular, el grupo con `score = High` presenta la mayor
+probabilidad acumulada de recaída y, especialmente, de muerte en
+remisión a lo largo del tiempo de seguimiento.
+
+#### 12.4
+
+Construir un gráfico de bondad de ajuste para el modelo utilizado.
+
+```{r fig.cap="Funciones de Incidencia Acumulada (CIF) para recaída (izquierda) y muerte en remisión (derecha). Las líneas continuas representan las estimaciones del modelo de riesgos competitivos de Fine-Gray, mientras que las líneas discontinuas muestran las estimaciones no paramétricas de Aalen-Johansen.", fig.width=9, fig.height=5, fig.align='center'}
+
+# calculando las funciones de incidencia acumulada 
+# de forma no paramétrica (Aalen-Johansen)
+cif_aj <-  cuminc(datos$time, datos$status, group= datos$score,cencode="cens")
+
+par(mfrow=c(1,2))
+
+plot(pred_low_1,
+     main = "CIFs de recaída \n (muerte como evento competitivo)",
+     ylim = c(0, 1), lwd=2, col="green", xlab = "Tiempo (días)", ylab = "",
+     cex.main = 0.8)
+lines(pred_medium_1, lty=2, lwd=2, col="blue")
+lines(pred_high_1, lty=3, lwd=2, col="red")
+lines(cif_aj$`Low risk 1`$time, cif_aj$`Low risk 1`$est,
+      type = "s", col = "green", lty = 3, lwd = 1.5)
+lines(cif_aj$`Medium risk 1`$time, cif_aj$`Medium risk 1`$est,
+      type = "s", col = "blue", lty = 3, lwd = 1.5)
+lines(cif_aj$`High risk 1`$time, cif_aj$`High risk 1`$est,
+      type = "s", col = "red", lty = 3, lwd = 1.5)
+legend("topright", 
+       legend = c("Low risk (FG)", "Medium risk (FG)", "High risk (FG)", 
+                  "Low risk (AJ)", "Medium risk (AJ)", "High risk (AJ)"),
+       col = rep(c("green", "blue", "red"), 2),
+       lty = c(rep(1, 3), rep(3, 3)),
+       lwd = c(rep(2, 3), rep(1.5, 3)), 
+       cex = 0.7, ncol = 2)
+
+
+plot(pred_low_2, 
+     main = "CIFs de muerte en remisión \n (recaída como evento competitivo)",
+     ylim = c(0, 1), lwd=2, col="green", xlab = "Tiempo (días)", ylab = "",
+     cex.main = 0.8)
+lines(pred_medium_2, lty=2, lwd=2, col="blue")
+lines(pred_high_2, lty=3, lwd=2, col="red")
+lines(cif_aj$`Low risk 2`$time, cif_aj$`Low risk 2`$est,
+      type = "s", col = "green", lty = 3, lwd = 1.5)
+lines(cif_aj$`Medium risk 2`$time, cif_aj$`Medium risk 2`$est,
+      type = "s", col = "blue", lty = 3, lwd = 1.5)
+lines(cif_aj$`High risk 2`$time, cif_aj$`High risk 2`$est,
+      type = "s", col = "red", lty = 3, lwd = 1.5)
+legend("topright", 
+       legend = c("Low risk (FG)", "Medium risk (FG)", "High risk (FG)", 
+                  "Low risk (AJ)", "Medium risk (AJ)", "High risk (AJ)"),
+       col = rep(c("green", "blue", "red"), 2),
+       lty = c(rep(1, 3), rep(3, 3)),
+       lwd = c(rep(2, 3), rep(1.5, 3)),
+       cex = 0.7, ncol = 2)
+```
+
+
+Se comparan las estimaciones obtenidas mediante el modelo de Fine-Gray (FG) y el estimador de Aalen-Johansen (AJ).
+
+Para el evento 2 (muerte en remisión), las curvas estimadas por ambos métodos presentan una evolución coherente y consistente a lo largo del tiempo, con una clara separación entre los distintos niveles de riesgo. Esta coherencia respalda la validez de los modelos para estimar la probabilidad acumulada de este evento, siendo evidente el mayor riesgo en los pacientes clasificados como de alto riesgo.
+
+En el caso del evento 1 (recaída), se observa una mayor discrepancia entre los métodos a medida que aumenta el tiempo. En los primeros tiempos, las curvas de FG y AJ son coherentes, pero progresivamente el modelo de Fine-Gray tiende a sobreestimar el riesgo acumulado en comparación con Aalen-Johansen. Esta diferencia es especialmente notable en el grupo de bajo riesgo, donde la curva de FG se mantiene sistemáticamente por encima de la correspondiente curva de AJ.
+
+Cabe destacar que no se observan cruces entre las curvas a lo largo del tiempo, lo que sugiere que se cumple el supuesto de riesgos proporcionales entre los grupos de riesgo.
+
+En conclusión, las curvas muestran una evolución coherente entre los métodos en los primeros tiempos y validan el modelo de Fine-Gray especialmente para el evento 2. Aunque hay una ligera sobreestimación del riesgo por parte del modelo de FG para el evento de recaída, especialmente en el grupo de bajo riesgo, el comportamiento general de las curvas respalda la adecuación del modelo en este contexto. El cumplimiento del supuesto de riesgos proporcionales refuerza su validez para el análisis de riesgos en competencia.
+
+
+
+
+
+
+
